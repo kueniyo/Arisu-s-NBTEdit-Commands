@@ -1,0 +1,26 @@
+license="LGPL-3.0-only"
+
+[[mods]]
+modId="enchantplus"
+version="${mod_version}"
+displayName="Arisu's NBTEdit Commands"
+authors="TendouArisu"
+logoFile="assets/enchantplus/icon.png"
+logoBlur=false
+description='''
+아이템 인챈트, 속성, 포션 효과, 이름 및 설명을 명령어로 편집합니다.
+'''
+
+[[dependencies.enchantplus]]
+modId="neoforge"
+type="required"
+versionRange="[${neo_version},)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.enchantplus]]
+modId="minecraft"
+type="required"
+versionRange="${minecraft_version_range}"
+ordering="NONE"
+side="BOTH"

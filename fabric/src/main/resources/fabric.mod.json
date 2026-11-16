@@ -3,7 +3,7 @@
   "id": "enchantplus",
   "version": "${version}",
   "name": "Arisu's NBTEdit Commands",
-  "description": "Adds commands to edit item enchantments, attributes, potion contents, names, and lore.",
+  "description": "Easily edit item NBT data using powerful, intuitive commands.",
   "authors": [
     "TendouArisu"
   ],
@@ -12,6 +12,9 @@
   "entrypoints": {
     "main": [
       "dev.kim.enchantplus.fabric.EnchantPlusFabric"
+    ],
+    "client": [
+      "dev.kim.enchantplus.fabric.EnchantPlusFabricClient"
     ]
   },
   "depends": {

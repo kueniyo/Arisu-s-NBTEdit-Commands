@@ -1,14 +1,13 @@
 package dev.kim.enchantplus.common;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.StringReader;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import com.mojang.brigadier.context.CommandContext;
-import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
-import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
 import com.google.gson.JsonParser;
 import com.mojang.serialization.JsonOps;
 import net.minecraft.commands.CommandBuildContext;
@@ -16,16 +15,27 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.commands.arguments.EntityArgument;
+import net.minecraft.commands.arguments.selector.EntitySelector;
+import net.minecraft.commands.arguments.selector.EntitySelectorParser;
+import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
 import net.minecraft.commands.arguments.ResourceArgument;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.util.ProblemReporter;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.Property;
+import net.minecraft.world.level.storage.TagValueOutput;
 import net.minecraft.network.chat.ComponentSerialization;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
@@ -47,12 +57,16 @@ import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.ItemEnchantments;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.concurrent.CompletableFuture;
 import java.util.List;
 import java.util.Locale;
 import java.util.LinkedHashSet;
+import java.util.Comparator;
+import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.Optional;
 
 /** Shared Brigadier command implementation used by both loader projects. */
@@ -83,48 +97,8 @@ public final class EnchantPlusCommands {
     private static final List<String> BOOLEAN_SUGGESTIONS = List.of("true", "false");
     private static final List<String> DURABILITY_TYPES = List.of("set", "damage", "add", "remove", "percentage");
 
-    private static final SimpleCommandExceptionType NO_HELD_ITEM = error("commands.enchantplus.error.no_held_item");
-    private static final SimpleCommandExceptionType NO_ENCHANTED_BOOK = error("commands.enchantplus.error.no_book");
-    private static final SimpleCommandExceptionType NOTHING_TO_REMOVE = error("commands.enchantplus.error.nothing_to_remove");
-    private static final SimpleCommandExceptionType NO_ATTRIBUTE_ITEM = error("commands.enchantplus.error.no_attribute_item");
-    private static final SimpleCommandExceptionType INVALID_TEXT_COMPONENT = error("commands.enchantplus.error.invalid_text_component");
-    private static final com.mojang.brigadier.exceptions.DynamicCommandExceptionType INVALID_LORE_LINE =
-            new com.mojang.brigadier.exceptions.DynamicCommandExceptionType(line ->
-                    Component.translatable("commands.enchantplus.error.invalid_lore_line", line));
-    private static final SimpleCommandExceptionType NO_ATTRIBUTE_MODIFIER = error("commands.enchantplus.error.no_attribute_modifier");
-    private static final SimpleCommandExceptionType INVALID_ATTRIBUTE_OPTIONS = error("commands.enchantplus.error.invalid_attribute_options");
-    private static final SimpleCommandExceptionType INVALID_ATTRIBUTE_AMOUNT = error("commands.enchantplus.error.invalid_attribute_amount");
-    private static final SimpleCommandExceptionType INVALID_ATTRIBUTE_ID = error("commands.enchantplus.error.invalid_attribute_id");
-    private static final SimpleCommandExceptionType INVALID_ATTRIBUTE_OPERATION = error("commands.enchantplus.error.invalid_attribute_operation");
-    private static final SimpleCommandExceptionType INVALID_ATTRIBUTE_SLOT = error("commands.enchantplus.error.invalid_attribute_slot");
-    private static final SimpleCommandExceptionType INVALID_ATTRIBUTE_DISPLAY = error("commands.enchantplus.error.invalid_attribute_display");
-    private static final SimpleCommandExceptionType POTION_PLAYER_ONLY = error("commands.enchantplus.error.potion_player_only");
-    private static final SimpleCommandExceptionType POTION_ITEM_REQUIRED = error("commands.enchantplus.error.potion_item_required");
-    private static final SimpleCommandExceptionType POTION_EFFECT_NOT_FOUND = error("commands.enchantplus.error.potion_effect_not_found");
-    private static final SimpleCommandExceptionType INVALID_POTION_OPTIONS = error("commands.enchantplus.error.invalid_potion_options");
-    private static final SimpleCommandExceptionType INVALID_POTION_BOOLEAN = error("commands.enchantplus.error.invalid_potion_boolean");
-    private static final SimpleCommandExceptionType NO_DURABILITY_ITEM = error("commands.enchantplus.error.no_durability_item");
-    private static final SimpleCommandExceptionType INVALID_DURABILITY_TYPE = error("commands.enchantplus.error.invalid_durability_type");
-    private static final DynamicCommandExceptionType INVALID_DURABILITY_PERCENTAGE = new DynamicCommandExceptionType(value ->
-            Component.translatable("commands.enchantplus.error.invalid_durability_percentage", value));
-    private static final DynamicCommandExceptionType INVALID_LEVEL = new DynamicCommandExceptionType(level ->
-            Component.translatable("commands.enchantplus.error.invalid_level", MAX_STORED_LEVEL, level));
-    private static final DynamicCommandExceptionType INVALID_ATTRIBUTE = new DynamicCommandExceptionType(type ->
-            Component.translatable("commands.enchantplus.error.invalid_attribute", type));
-    private static final DynamicCommandExceptionType INVALID_POTION_COLOR = new DynamicCommandExceptionType(color ->
-            Component.translatable("commands.enchantplus.error.invalid_potion_color", color));
-    private static final DynamicCommandExceptionType INVALID_POTION_AMPLIFIER = new DynamicCommandExceptionType(value ->
-            Component.translatable("commands.enchantplus.error.invalid_potion_amplifier", value));
-    private static final DynamicCommandExceptionType INVALID_POTION_DURATION = new DynamicCommandExceptionType(value ->
-            Component.translatable("commands.enchantplus.error.invalid_potion_duration", value));
-    private static final DynamicCommandExceptionType INVALID_POTION_EFFECT = new DynamicCommandExceptionType(value ->
-            Component.translatable("commands.enchantplus.error.invalid_potion_effect", value));
 
     private EnchantPlusCommands() {
-    }
-
-    private static SimpleCommandExceptionType error(String key) {
-        return new SimpleCommandExceptionType(Component.translatable(key));
     }
 
     /**
@@ -144,29 +118,232 @@ public final class EnchantPlusCommands {
         registerItemNameCommand(dispatcher);
         registerItemLoreCommand(dispatcher);
         registerInfoCommand(dispatcher);
+        registerCopyNbtCommands(dispatcher);
+    }
+
+    // -------------------------------------------------------------------------
+    // Copy NBT data. The full data is shown in chat and has vanilla's
+    // copy_to_clipboard click event. Clients with this mod also receive a
+    // negotiated custom payload and copy the value immediately.
+    // -------------------------------------------------------------------------
+
+    private static void registerCopyNbtCommands(CommandDispatcher<CommandSourceStack> dispatcher) {
+        registerCopyItemCommand(dispatcher, "copynbt", true);
+        registerCopyItemCommand(dispatcher, "cni", false);
+        registerCopyEntityCommand(dispatcher, "copynbt", true);
+        registerCopyEntityCommand(dispatcher, "cne", false);
+        registerCopyBlockCommand(dispatcher, "copynbt", true);
+        registerCopyBlockCommand(dispatcher, "cnb", false);
+    }
+
+    private static void registerCopyItemCommand(CommandDispatcher<CommandSourceStack> dispatcher,
+                                                 String root, boolean withSubcommand) {
+        var itemCommand = Commands.literal("item")
+                .executes(context -> copyHeldItem(context, "nbt"))
+                .then(buildOptionalItemTargetBranch());
+
+        var command = Commands.literal(root).requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS));
+        if (withSubcommand) {
+            command.then(itemCommand);
+        } else {
+            command.executes(context -> copyHeldItem(context, "nbt"))
+                    .then(buildOptionalItemTargetBranch());
+        }
+        dispatcher.register(command);
+    }
+
+    /**
+     * The first optional token is parsed as a string so its suggestions can be
+     * restricted to player targets/selectors. "nbt" and "name" remain valid
+     * manual shorthand tokens for copying the command sender's own item.
+     */
+    private static com.mojang.brigadier.builder.RequiredArgumentBuilder<CommandSourceStack, String>
+    buildOptionalItemTargetBranch() {
+        return Commands.argument("target", StringArgumentType.word())
+                .suggests((context, builder) -> {
+                    List<String> suggestions = new ArrayList<>();
+                    suggestions.add("@s");
+                    suggestions.add("@p");
+                    suggestions.add("@r");
+                    suggestions.add("@a");
+                    context.getSource().getServer().getPlayerList().getPlayers()
+                            .forEach(player -> suggestions.add(player.getGameProfile().name()));
+                    return SharedSuggestionProvider.suggest(suggestions, builder);
+                })
+                .executes(EnchantPlusCommands::copyItemFromOptionalTargetToken)
+                .then(Commands.argument("type", StringArgumentType.word())
+                        .suggests((context, builder) -> SharedSuggestionProvider.suggest(
+                                List.of("nbt", "name"), builder))
+                        .executes(EnchantPlusCommands::copyItemFromTargetAndType));
+    }
+
+    private static int copyItemFromOptionalTargetToken(CommandContext<CommandSourceStack> context)
+            throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        String token = StringArgumentType.getString(context, "target");
+        if (token.equalsIgnoreCase("nbt") || token.equalsIgnoreCase("name")) {
+            return copyHeldItem(context, token.toLowerCase(Locale.ROOT));
+        }
+        return copyTargetItem(context, resolveSinglePlayer(context, token), "nbt");
+    }
+
+    private static int copyItemFromTargetAndType(CommandContext<CommandSourceStack> context)
+            throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        String targetToken = StringArgumentType.getString(context, "target");
+        if (targetToken.equalsIgnoreCase("nbt") || targetToken.equalsIgnoreCase("name")) {
+            throw CommandLocalization.error(context, "commands.enchantplus.error.copy_target_required");
+        }
+        String type = StringArgumentType.getString(context, "type").toLowerCase(Locale.ROOT);
+        if (!type.equals("nbt") && !type.equals("name")) {
+            throw CommandLocalization.error(context, "commands.enchantplus.error.copy_invalid_type");
+        }
+        return copyTargetItem(context, resolveSinglePlayer(context, targetToken), type);
+    }
+
+    private static ServerPlayer resolveSinglePlayer(CommandContext<CommandSourceStack> context, String token)
+            throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        EntitySelector selector = new EntitySelectorParser(new StringReader(token), true).parse();
+        return selector.findSinglePlayer(context.getSource());
+    }
+
+    private static void registerCopyEntityCommand(CommandDispatcher<CommandSourceStack> dispatcher,
+                                                  String root, boolean withSubcommand) {
+        var entityArgument = Commands.argument("target", EntityArgument.entity())
+                .executes(context -> {
+                    Entity entity = EntityArgument.getEntity(context, "target");
+                    TagValueOutput output = TagValueOutput.createWithContext(
+                            ProblemReporter.DISCARDING, entity.registryAccess());
+                    entity.saveWithoutId(output);
+                    Identifier entityId = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
+                    if (entityId != null) {
+                        output.putString("id", entityId.toString());
+                    }
+                    CompoundTag tag = output.buildResult();
+                    return sendClipboard(context, tag.toString());
+                });
+        var command = Commands.literal(root).requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS));
+        if (withSubcommand) {
+            command.then(Commands.literal("entity").then(entityArgument));
+        } else {
+            command.then(entityArgument);
+        }
+        dispatcher.register(command);
+    }
+
+    private static void registerCopyBlockCommand(CommandDispatcher<CommandSourceStack> dispatcher,
+                                                 String root, boolean withSubcommand) {
+        var positionArgument = Commands.argument("pos", BlockPosArgument.blockPos())
+                .executes(context -> {
+                    BlockPos pos = BlockPosArgument.getBlockPos(context, "pos");
+                    var level = context.getSource().getLevel();
+                    BlockState state = level.getBlockState(pos);
+                    StringBuilder value = new StringBuilder(serializeBlockState(state));
+                    BlockEntity blockEntity = level.getBlockEntity(pos);
+                    if (blockEntity != null) {
+                        CompoundTag tag = blockEntity.saveWithFullMetadata(context.getSource().registryAccess());
+                        value.append(tag);
+                    }
+                    return sendClipboard(context, value.toString());
+                });
+        var command = Commands.literal(root).requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS));
+        if (withSubcommand) {
+            command.then(Commands.literal("block").then(positionArgument));
+        } else {
+            command.then(positionArgument);
+        }
+        dispatcher.register(command);
+    }
+
+    private static String serializeBlockState(BlockState state) {
+        return state.getValues()
+                .map(value -> serializeStateProperty(value.property(), value.value()))
+                .sorted()
+                .collect(Collectors.joining(",", "[", "]"));
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static String serializeStateProperty(Property<?> property, Comparable<?> value) {
+        Property rawProperty = property;
+        return property.getName() + "=" + rawProperty.getName((Comparable) value);
+    }
+
+    private static int copyHeldItem(CommandContext<CommandSourceStack> context, String type)
+            throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer player = context.getSource().getPlayerOrException();
+        return copyItem(context, player, type);
+    }
+
+    private static int copyTargetItem(CommandContext<CommandSourceStack> context, ServerPlayer target, String type)
+            throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        return copyItem(context, target, type);
+    }
+
+    private static int copyItem(CommandContext<CommandSourceStack> context, ServerPlayer target, String type)
+            throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ItemStack stack = target.getMainHandItem();
+        if (stack.isEmpty()) {
+            throw CommandLocalization.error(context, "commands.enchantplus.error.no_held_item");
+        }
+        String value;
+        if ("name".equals(type)) {
+            value = ComponentSerialization.CODEC.encodeStart(JsonOps.INSTANCE, stack.getHoverName())
+                    .result().orElseThrow().toString();
+        } else {
+            TagValueOutput output = TagValueOutput.createWithContext(
+                    ProblemReporter.DISCARDING, context.getSource().registryAccess());
+            output.store(ItemStack.MAP_CODEC, stack);
+            value = output.buildResult().toString();
+        }
+        return sendClipboard(context, value);
+    }
+
+    private static int sendClipboard(CommandContext<CommandSourceStack> context, String value)
+            throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        if (value.getBytes(StandardCharsets.UTF_8).length > ClipboardPayload.MAX_LENGTH) {
+            throw CommandLocalization.error(context, "commands.enchantplus.error.copy_too_large",
+                    ClipboardPayload.MAX_LENGTH);
+        }
+
+        // Only send a custom packet when the command sender has this mod installed.
+        // Vanilla clients simply receive the normal clickable chat component below.
+        if (context.getSource().getEntity() instanceof ServerPlayer sender) {
+            ClipboardTransport.sendIfSupported(sender, value);
+        }
+
+        Component clickableData = Component.literal(value)
+                .withStyle(style -> style
+                        .withColor(ChatFormatting.GREEN)
+                        .withUnderlined(true)
+                        .withClickEvent(new ClickEvent.CopyToClipboard(value))
+                        .withHoverEvent(new HoverEvent.ShowText(
+                                CommandLocalization.translate(context.getSource(), "commands.enchantplus.copy.hover"))));
+        Component message = CommandLocalization.translate(context.getSource(), "commands.enchantplus.copy.ready")
+                .append(Component.literal("\n"))
+                .append(clickableData);
+        context.getSource().sendSuccess(() -> message, false);
+        return 1;
     }
 
     /** Shows official project links. This informational command is intentionally available without admin permission. */
     private static void registerInfoCommand(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("nbtedit")
                 .executes(context -> {
-                    Component message = Component.translatable("commands.enchantplus.info.header")
+                    Component message = CommandLocalization.translate(context.getSource(), "commands.enchantplus.info.header")
                             .append(Component.literal("\n"))
-                            .append(Component.translatable("commands.enchantplus.info.modrinth")
+                            .append(CommandLocalization.translate(context.getSource(), "commands.enchantplus.info.modrinth")
                                     .withStyle(style -> style
                                             .withColor(ChatFormatting.GREEN)
                                             .withUnderlined(true)
                                             .withClickEvent(new ClickEvent.OpenUrl(MODRINTH_URI))
                                             .withHoverEvent(new HoverEvent.ShowText(
-                                                    Component.translatable("commands.enchantplus.info.hover_modrinth")))))
+                                                    CommandLocalization.translate(context.getSource(), "commands.enchantplus.info.hover_modrinth")))))
                             .append(Component.literal("  |  "))
-                            .append(Component.translatable("commands.enchantplus.info.discord")
+                            .append(CommandLocalization.translate(context.getSource(), "commands.enchantplus.info.discord")
                                     .withStyle(style -> style
                                             .withColor(ChatFormatting.LIGHT_PURPLE)
                                             .withUnderlined(true)
                                             .withClickEvent(new ClickEvent.OpenUrl(DISCORD_URI))
                                             .withHoverEvent(new HoverEvent.ShowText(
-                                                    Component.translatable("commands.enchantplus.info.hover_discord")))));
+                                                    CommandLocalization.translate(context.getSource(), "commands.enchantplus.info.hover_discord")))));
                     context.getSource().sendSuccess(() -> message, false);
                     return 1;
                 }));
@@ -220,7 +397,7 @@ public final class EnchantPlusCommands {
     private static int apply(CommandContext<CommandSourceStack> context,
                              int level,
                              DataComponentType<ItemEnchantments> component) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
-        checkLevel(level);
+        checkLevel(context, level);
         Holder<Enchantment> enchantment = ResourceArgument.getEnchantment(context, "enchantment");
         Collection<? extends Entity> targets = EntityArgument.getEntities(context, "targets");
         int changed = 0;
@@ -243,19 +420,19 @@ public final class EnchantPlusCommands {
             Component targetName = target.getDisplayName();
             Component enchantmentName = Component.literal(enchantment.unwrapKey()
                     .map(ResourceKey::identifier).map(Identifier::toString).orElse("unknown"));
-            context.getSource().sendSuccess(() -> Component.translatable(
-                    "commands.enchantplus.success.enchant", targetName, enchantmentName, level), true);
+            CommandLocalization.sendSuccess(context, true,
+                    "commands.enchantplus.success.enchant", targetName, enchantmentName, level);
         }
 
         if (changed == 0) {
-            throw NO_HELD_ITEM.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.no_held_item");
         }
         return changed;
     }
 
     private static int applyToBooks(CommandContext<CommandSourceStack> context,
                                     int level) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
-        checkLevel(level);
+        checkLevel(context, level);
         Holder<Enchantment> enchantment = ResourceArgument.getEnchantment(context, "enchantment");
         Collection<ServerPlayer> targets = EntityArgument.getPlayers(context, "targets");
         int changed = 0;
@@ -285,11 +462,11 @@ public final class EnchantPlusCommands {
         }
 
         if (changed == 0) {
-            throw NO_ENCHANTED_BOOK.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.no_book");
         }
         final int changedCount = changed;
-        context.getSource().sendSuccess(() -> Component.translatable(
-                "commands.enchantplus.success.book", changedCount, level), true);
+        CommandLocalization.sendSuccess(context, true,
+                "commands.enchantplus.success.book", changedCount, level);
         return changed;
     }
 
@@ -321,12 +498,12 @@ public final class EnchantPlusCommands {
             stack.remove(DataComponents.STORED_ENCHANTMENTS);
             changed++;
             Component playerName = player.getDisplayName();
-            context.getSource().sendSuccess(() -> Component.translatable(
-                    "commands.enchantplus.success.book_remove_all", playerName), true);
+            CommandLocalization.sendSuccess(context, true,
+                    "commands.enchantplus.success.book_remove_all", playerName);
         }
 
         if (changed == 0) {
-            throw NOTHING_TO_REMOVE.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.nothing_to_remove");
         }
         return changed;
     }
@@ -348,20 +525,20 @@ public final class EnchantPlusCommands {
                 Component playerName = player.getDisplayName();
                 Component enchantmentName = Component.literal(enchantment.unwrapKey()
                         .map(ResourceKey::identifier).map(Identifier::toString).orElse("unknown"));
-                context.getSource().sendSuccess(() -> Component.translatable(
-                        "commands.enchantplus.success.book_remove_one", playerName, enchantmentName), true);
+                CommandLocalization.sendSuccess(context, true,
+                        "commands.enchantplus.success.book_remove_one", playerName, enchantmentName);
             }
         }
 
         if (changed == 0) {
-            throw NOTHING_TO_REMOVE.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.nothing_to_remove");
         }
         return changed;
     }
 
-    private static void checkLevel(int level) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+    private static void checkLevel(CommandContext<CommandSourceStack> context, int level) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         if (level < 1 || level > MAX_STORED_LEVEL) {
-            throw INVALID_LEVEL.create(level);
+            throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_level", MAX_STORED_LEVEL, level);
         }
     }
 
@@ -383,13 +560,13 @@ public final class EnchantPlusCommands {
             if (removed) {
                 changed++;
                 Component targetName = target.getDisplayName();
-                context.getSource().sendSuccess(() -> Component.translatable(
-                        "commands.enchantplus.success.remove_all", targetName), true);
+                CommandLocalization.sendSuccess(context, true,
+                        "commands.enchantplus.success.remove_all", targetName);
             }
         }
 
         if (changed == 0) {
-            throw NOTHING_TO_REMOVE.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.nothing_to_remove");
         }
         return changed;
     }
@@ -415,13 +592,13 @@ public final class EnchantPlusCommands {
                 Component targetName = target.getDisplayName();
                 Component enchantmentName = Component.literal(enchantment.unwrapKey()
                         .map(ResourceKey::identifier).map(Identifier::toString).orElse("unknown"));
-                context.getSource().sendSuccess(() -> Component.translatable(
-                        "commands.enchantplus.success.remove_one", targetName, enchantmentName), true);
+                CommandLocalization.sendSuccess(context, true,
+                        "commands.enchantplus.success.remove_one", targetName, enchantmentName);
             }
         }
 
         if (changed == 0) {
-            throw NOTHING_TO_REMOVE.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.nothing_to_remove");
         }
         return changed;
     }
@@ -469,21 +646,21 @@ public final class EnchantPlusCommands {
             throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         ItemStack stack = context.getSource().getPlayerOrException().getMainHandItem();
         if (stack.isEmpty()) {
-            throw NO_HELD_ITEM.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.no_held_item");
         }
         return stack;
     }
 
-    private static Component parseJsonTextComponent(String json)
+    private static Component parseJsonTextComponent(CommandContext<CommandSourceStack> context, String json)
             throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         try {
             var parsed = ComponentSerialization.CODEC.parse(JsonOps.INSTANCE, JsonParser.parseString(json));
             if (parsed.result().isEmpty()) {
-                throw INVALID_TEXT_COMPONENT.create();
+                throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_text_component");
             }
             return parsed.result().get();
         } catch (com.google.gson.JsonParseException | IllegalStateException exception) {
-            throw INVALID_TEXT_COMPONENT.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_text_component");
         }
     }
 
@@ -492,13 +669,13 @@ public final class EnchantPlusCommands {
         ItemStack stack = getCommandingPlayerMainHand(context);
         String json = StringArgumentType.getString(context, "name").trim();
         if (json.isEmpty()) {
-            throw INVALID_TEXT_COMPONENT.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_text_component");
         }
-        Component name = parseJsonTextComponent(json);
+        Component name = parseJsonTextComponent(context, json);
         stack.set(DataComponents.ITEM_NAME, name);
         Component playerName = context.getSource().getPlayerOrException().getDisplayName();
-        context.getSource().sendSuccess(() -> Component.translatable(
-                "commands.enchantplus.success.itemname_set", playerName), true);
+        CommandLocalization.sendSuccess(context, true,
+                "commands.enchantplus.success.itemname_set", playerName);
         return 1;
     }
 
@@ -520,8 +697,8 @@ public final class EnchantPlusCommands {
         }
 
         Component playerName = context.getSource().getPlayerOrException().getDisplayName();
-        context.getSource().sendSuccess(() -> Component.translatable(
-                "commands.enchantplus.success.itemname_reset", playerName), true);
+        CommandLocalization.sendSuccess(context, true,
+                "commands.enchantplus.success.itemname_reset", playerName);
         return 1;
     }
 
@@ -531,7 +708,7 @@ public final class EnchantPlusCommands {
         int lineNumber = IntegerArgumentType.getInteger(context, "line");
         String input = StringArgumentType.getString(context, "description").trim();
         if (input.isEmpty()) {
-            throw INVALID_TEXT_COMPONENT.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_text_component");
         }
 
         ItemLore currentLore = stack.getOrDefault(DataComponents.LORE, ItemLore.EMPTY);
@@ -541,18 +718,18 @@ public final class EnchantPlusCommands {
 
         if (operation.equals("remove")) {
             if (lineNumber > lines.size()) {
-                throw INVALID_LORE_LINE.create(lineNumber);
+                throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_lore_line", lineNumber);
             }
             lines.remove(lineNumber - 1);
             messageKey = "commands.enchantplus.success.itemlore_remove";
         } else if (operation.equals("clear")) {
             if (lineNumber > lines.size()) {
-                throw INVALID_LORE_LINE.create(lineNumber);
+                throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_lore_line", lineNumber);
             }
             lines.set(lineNumber - 1, Component.empty());
             messageKey = "commands.enchantplus.success.itemlore_clear";
         } else {
-            Component description = parseJsonTextComponent(input);
+            Component description = parseJsonTextComponent(context, input);
             // Setting a later line fills intervening positions with empty components so that
             // line numbers remain stable instead of silently shifting existing lore entries.
             while (lines.size() < lineNumber - 1) {
@@ -573,7 +750,7 @@ public final class EnchantPlusCommands {
         }
 
         Component playerName = context.getSource().getPlayerOrException().getDisplayName();
-        context.getSource().sendSuccess(() -> Component.translatable(messageKey, playerName, lineNumber), true);
+        CommandLocalization.sendSuccess(context, true, messageKey, playerName, lineNumber);
         return 1;
     }
 
@@ -582,8 +759,8 @@ public final class EnchantPlusCommands {
         ItemStack stack = getCommandingPlayerMainHand(context);
         stack.remove(DataComponents.LORE);
         Component playerName = context.getSource().getPlayerOrException().getDisplayName();
-        context.getSource().sendSuccess(() -> Component.translatable(
-                "commands.enchantplus.success.itemlore_reset", playerName), true);
+        CommandLocalization.sendSuccess(context, true,
+                "commands.enchantplus.success.itemlore_reset", playerName);
         return 1;
     }
 
@@ -719,7 +896,7 @@ public final class EnchantPlusCommands {
         ServerPlayer target = EntityArgument.getPlayer(context, "target");
         ItemStack stack = target.getMainHandItem();
         if (stack.isEmpty()) {
-            throw NO_ATTRIBUTE_ITEM.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.no_attribute_item");
         }
 
         Holder.Reference<Attribute> attribute = ResourceArgument.getResource(context, "type", Registries.ATTRIBUTE);
@@ -727,30 +904,30 @@ public final class EnchantPlusCommands {
                 .map(Identifier::toString).orElse("unknown");
         double amount = doubleArgumentOrDefault(context, "amount", 1.0);
         if (!Double.isFinite(amount)) {
-            throw INVALID_ATTRIBUTE_AMOUNT.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_attribute_amount");
         }
 
         String idInput = stringArgumentOrDefault(context, "id", typeInput);
         Identifier modifierId = Identifier.tryParse(idInput);
         if (modifierId == null) {
-            throw INVALID_ATTRIBUTE_ID.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_attribute_id");
         }
 
         String operationInput = stringArgumentOrDefault(context, "operation", "add_value");
         if (!isOperation(operationInput)) {
-            throw INVALID_ATTRIBUTE_OPERATION.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_attribute_operation");
         }
         AttributeModifier.Operation operation = parseOperation(operationInput);
 
         String slotInput = stringArgumentOrDefault(context, "slot", "any");
         if (!isSlot(slotInput)) {
-            throw INVALID_ATTRIBUTE_SLOT.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_attribute_slot");
         }
         EquipmentSlotGroup slot = parseSlot(slotInput);
 
         String displayName = stringArgumentOrDefault(context, "display", "default");
         if (!isDisplay(displayName)) {
-            throw INVALID_ATTRIBUTE_DISPLAY.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_attribute_display");
         }
         displayName = displayName.toLowerCase(Locale.ROOT);
 
@@ -771,9 +948,9 @@ public final class EnchantPlusCommands {
 
         final double finalAmount = amount;
         final String finalId = modifierId.toString();
-        context.getSource().sendSuccess(() -> Component.translatable(
+        CommandLocalization.sendSuccess(context, true,
                 "commands.enchantplus.success.attribute_add", target.getName(), typeInput,
-                finalAmount, finalId), true);
+                finalAmount, finalId);
         return 1;
     }
 
@@ -800,19 +977,19 @@ public final class EnchantPlusCommands {
         ServerPlayer target = EntityArgument.getPlayer(context, "target");
         ItemStack stack = target.getMainHandItem();
         if (stack.isEmpty()) {
-            throw NO_ATTRIBUTE_ITEM.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.no_attribute_item");
         }
 
         ItemAttributeModifiers current = stack.getOrDefault(DataComponents.ATTRIBUTE_MODIFIERS,
                 ItemAttributeModifiers.EMPTY);
         if (current.modifiers().isEmpty()) {
-            throw NO_ATTRIBUTE_MODIFIER.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.no_attribute_modifier");
         }
 
         // Keep an explicit empty component so prototype/default modifiers are also suppressed.
         stack.set(DataComponents.ATTRIBUTE_MODIFIERS, ItemAttributeModifiers.EMPTY);
-        context.getSource().sendSuccess(() -> Component.translatable(
-                "commands.enchantplus.success.attribute_remove_all", target.getDisplayName()), true);
+        CommandLocalization.sendSuccess(context, true,
+                "commands.enchantplus.success.attribute_remove_all", target.getDisplayName());
         return 1;
     }
 
@@ -821,7 +998,7 @@ public final class EnchantPlusCommands {
         ServerPlayer target = EntityArgument.getPlayer(context, "target");
         ItemStack stack = target.getMainHandItem();
         if (stack.isEmpty()) {
-            throw NO_ATTRIBUTE_ITEM.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.no_attribute_item");
         }
 
         Holder.Reference<Attribute> attribute = ResourceArgument.getResource(context, "type", Registries.ATTRIBUTE);
@@ -830,7 +1007,7 @@ public final class EnchantPlusCommands {
         String idInput = stringArgumentOrDefault(context, "id", "");
         Identifier requestedId = idInput.isEmpty() ? null : Identifier.tryParse(idInput);
         if (!idInput.isEmpty() && requestedId == null) {
-            throw INVALID_ATTRIBUTE_ID.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_attribute_id");
         }
 
         ItemAttributeModifiers current = stack.getOrDefault(DataComponents.ATTRIBUTE_MODIFIERS,
@@ -844,11 +1021,11 @@ public final class EnchantPlusCommands {
             removed = entries.removeIf(entry -> entry.matches(attribute, idToRemove));
         }
         if (!removed) {
-            throw NO_ATTRIBUTE_MODIFIER.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.no_attribute_modifier");
         }
         stack.set(DataComponents.ATTRIBUTE_MODIFIERS, new ItemAttributeModifiers(entries));
-        context.getSource().sendSuccess(() -> Component.translatable(
-                "commands.enchantplus.success.attribute_remove", target.getName(), typeInput), true);
+        CommandLocalization.sendSuccess(context, true,
+                "commands.enchantplus.success.attribute_remove", target.getName(), typeInput);
         return 1;
     }
 
@@ -957,7 +1134,7 @@ public final class EnchantPlusCommands {
     private static int executePotionAdd(CommandContext<CommandSourceStack> context)
             throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         String raw = StringArgumentType.getString(context, "arguments").trim();
-        if (raw.isEmpty()) throw INVALID_POTION_OPTIONS.create();
+        if (raw.isEmpty()) throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_potion_options");
 
         String[] tokens = raw.split("\\s+");
         int cursor = 0;
@@ -965,27 +1142,27 @@ public final class EnchantPlusCommands {
         if (isColorToken(tokens[0])) {
             colorInput = tokens[cursor++];
         }
-        if (cursor >= tokens.length) throw INVALID_POTION_OPTIONS.create();
+        if (cursor >= tokens.length) throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_potion_options");
 
         String effectId = tokens[cursor++];
         Holder<MobEffect> effect = resolvePotionEffect(context, effectId);
-        int amplifier = cursor < tokens.length ? parsePotionInteger(tokens[cursor++], "amplifier") : 0;
-        int duration = cursor < tokens.length ? parsePotionInteger(tokens[cursor++], "duration") : DEFAULT_POTION_DURATION;
-        boolean showParticles = cursor < tokens.length ? parseBoolean(tokens[cursor++]) : true;
-        boolean showIcon = cursor < tokens.length ? parseBoolean(tokens[cursor++]) : true;
-        boolean ambient = cursor < tokens.length ? parseBoolean(tokens[cursor++]) : false;
-        if (cursor != tokens.length) throw INVALID_POTION_OPTIONS.create();
+        int amplifier = cursor < tokens.length ? parsePotionInteger(context, tokens[cursor++], "amplifier") : 0;
+        int duration = cursor < tokens.length ? parsePotionInteger(context, tokens[cursor++], "duration") : DEFAULT_POTION_DURATION;
+        boolean showParticles = cursor < tokens.length ? parseBoolean(context, tokens[cursor++]) : true;
+        boolean showIcon = cursor < tokens.length ? parseBoolean(context, tokens[cursor++]) : true;
+        boolean ambient = cursor < tokens.length ? parseBoolean(context, tokens[cursor++]) : false;
+        if (cursor != tokens.length) throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_potion_options");
 
         return applyPotion(context, effect, colorInput, amplifier, duration, showParticles, showIcon, ambient);
     }
 
-    private static int parsePotionInteger(String token, String argumentName)
+    private static int parsePotionInteger(CommandContext<CommandSourceStack> context, String token, String argumentName)
             throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         try {
             return Integer.parseInt(token);
         } catch (NumberFormatException exception) {
-            if ("amplifier".equals(argumentName)) throw INVALID_POTION_AMPLIFIER.create(token);
-            throw INVALID_POTION_DURATION.create(token);
+            if ("amplifier".equals(argumentName)) throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_potion_amplifier", token);
+            throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_potion_duration", token);
         }
     }
 
@@ -993,10 +1170,10 @@ public final class EnchantPlusCommands {
                                                            String effectId)
             throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         Identifier identifier = Identifier.tryParse(effectId);
-        if (identifier == null) throw INVALID_POTION_EFFECT.create(effectId);
+        if (identifier == null) throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_potion_effect", effectId);
         ResourceKey<MobEffect> key = ResourceKey.create(Registries.MOB_EFFECT, identifier);
         var found = context.getSource().registryAccess().lookupOrThrow(Registries.MOB_EFFECT).get(key);
-        if (found.isEmpty()) throw INVALID_POTION_EFFECT.create(effectId);
+        if (found.isEmpty()) throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_potion_effect", effectId);
         return found.get();
     }
 
@@ -1023,12 +1200,12 @@ public final class EnchantPlusCommands {
             throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         Collection<ServerPlayer> targets = EntityArgument.getPlayers(context, "targets");
         if (amplifier < 0 || amplifier > 255) {
-            throw INVALID_POTION_AMPLIFIER.create(amplifier);
+            throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_potion_amplifier", amplifier);
         }
         if (duration < -1) {
-            throw INVALID_POTION_DURATION.create(duration);
+            throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_potion_duration", duration);
         }
-        Integer parsedColor = colorInput == null ? null : parseColor(colorInput);
+        Integer parsedColor = colorInput == null ? null : parseColor(context, colorInput);
         int changed = 0;
 
         for (ServerPlayer player : targets) {
@@ -1055,13 +1232,13 @@ public final class EnchantPlusCommands {
             Component itemKind = Component.translatable(stack.getItem().getDescriptionId());
             Component effectName = Component.literal(effect.unwrapKey().map(ResourceKey::identifier)
                     .map(Identifier::toString).orElse(""));
-            context.getSource().sendSuccess(() -> Component.translatable(
+            CommandLocalization.sendSuccess(context, true,
                     "commands.enchantplus.success.potion", playerName, itemKind, effectName,
-                    amplifier, duration), true);
+                    amplifier, duration);
         }
 
         if (changed == 0) {
-            throw POTION_ITEM_REQUIRED.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.potion_item_required");
         }
         return changed;
     }
@@ -1089,12 +1266,12 @@ public final class EnchantPlusCommands {
             changed++;
 
             Component itemKind = Component.translatable(stack.getItem().getDescriptionId());
-            context.getSource().sendSuccess(() -> Component.translatable(
-                    "commands.enchantplus.success.potion_remove_all", player.getDisplayName(), itemKind), true);
+            CommandLocalization.sendSuccess(context, true,
+                    "commands.enchantplus.success.potion_remove_all", player.getDisplayName(), itemKind);
         }
 
         if (changed == 0) {
-            throw POTION_EFFECT_NOT_FOUND.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.potion_effect_not_found");
         }
         return changed;
     }
@@ -1132,12 +1309,12 @@ public final class EnchantPlusCommands {
             Component itemKind = Component.translatable(stack.getItem().getDescriptionId());
             Component effectName = Component.literal(effect.unwrapKey().map(ResourceKey::identifier)
                     .map(Identifier::toString).orElse(""));
-            context.getSource().sendSuccess(() -> Component.translatable(
-                    "commands.enchantplus.success.potion_remove", playerName, itemKind, effectName), true);
+            CommandLocalization.sendSuccess(context, true,
+                    "commands.enchantplus.success.potion_remove", playerName, itemKind, effectName);
         }
 
         if (changed == 0) {
-            throw POTION_EFFECT_NOT_FOUND.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.potion_effect_not_found");
         }
         return changed;
     }
@@ -1175,12 +1352,12 @@ public final class EnchantPlusCommands {
             int maximum = stack.getMaxDamage();
             stack.setDamageValue(0);
             changed++;
-            context.getSource().sendSuccess(() -> Component.translatable(
-                    "commands.enchantplus.success.durability_repair", target.getDisplayName(), maximum), true);
+            CommandLocalization.sendSuccess(context, true,
+                    "commands.enchantplus.success.durability_repair", target.getDisplayName(), maximum);
         }
 
         if (changed == 0) {
-            throw NO_DURABILITY_ITEM.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.no_durability_item");
         }
         return changed;
     }
@@ -1191,10 +1368,10 @@ public final class EnchantPlusCommands {
         int value = IntegerArgumentType.getInteger(context, "value");
         String type = stringArgumentOrDefault(context, "type", "set").toLowerCase(Locale.ROOT);
         if (!DURABILITY_TYPES.contains(type)) {
-            throw INVALID_DURABILITY_TYPE.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_durability_type");
         }
         if (type.equals("percentage") && value > 100) {
-            throw INVALID_DURABILITY_PERCENTAGE.create(value);
+            throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_durability_percentage", value);
         }
 
         int changed = 0;
@@ -1221,12 +1398,12 @@ public final class EnchantPlusCommands {
             stack.setDamageValue(maximum - newRemaining);
             changed++;
 
-            context.getSource().sendSuccess(() -> Component.translatable(
-                    "commands.enchantplus.success.durability", target.getDisplayName(), newRemaining, maximum), true);
+            CommandLocalization.sendSuccess(context, true,
+                    "commands.enchantplus.success.durability", target.getDisplayName(), newRemaining, maximum);
         }
 
         if (changed == 0) {
-            throw NO_DURABILITY_ITEM.create();
+            throw CommandLocalization.error(context, "commands.enchantplus.error.no_durability_item");
         }
         return changed;
     }
@@ -1236,29 +1413,29 @@ public final class EnchantPlusCommands {
                 || stack.is(Items.LINGERING_POTION) || stack.is(Items.TIPPED_ARROW);
     }
 
-    private static int parseColor(String token)
+    private static int parseColor(CommandContext<CommandSourceStack> context, String token)
             throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         try {
             int value;
             if (token.startsWith("#")) {
-                if (token.length() != 7) throw INVALID_POTION_COLOR.create(token);
+                if (token.length() != 7) throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_potion_color", token);
                 value = Integer.parseInt(token.substring(1), 16);
             } else {
                 value = Integer.parseInt(token);
             }
-            if (value < 0 || value > 0xFFFFFF) throw INVALID_POTION_COLOR.create(token);
+            if (value < 0 || value > 0xFFFFFF) throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_potion_color", token);
             return value;
         } catch (NumberFormatException exception) {
-            throw INVALID_POTION_COLOR.create(token);
+            throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_potion_color", token);
         }
     }
 
-    private static boolean parseBoolean(String token)
+    private static boolean parseBoolean(CommandContext<CommandSourceStack> context, String token)
             throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         return switch (token.toLowerCase(Locale.ROOT)) {
             case "1b", "true", "yes" -> true;
             case "0b", "false", "no" -> false;
-            default -> throw INVALID_POTION_BOOLEAN.create();
+            default -> throw CommandLocalization.error(context, "commands.enchantplus.error.invalid_potion_boolean");
         };
     }
 

@@ -8,7 +8,7 @@ authors="TendouArisu"
 logoFile="assets/enchantplus/icon.png"
 logoBlur=false
 description='''
-아이템 인챈트, 속성, 포션 효과, 이름 및 설명을 명령어로 편집합니다.
+Easily edit item NBT data using powerful, intuitive commands.
 '''
 
 [[dependencies.enchantplus]]
